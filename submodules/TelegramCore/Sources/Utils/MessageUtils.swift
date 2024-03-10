@@ -366,11 +366,11 @@ public extension Message {
     
     func isCopyProtected() -> Bool {
         if self.flags.contains(.CopyProtected) {
-            return true
+            return false
         } else if let group = self.peers[self.id.peerId] as? TelegramGroup, group.flags.contains(.copyProtectionEnabled) {
-            return true
+            return false
         } else if let channel = self.peers[self.id.peerId] as? TelegramChannel, channel.flags.contains(.copyProtectionEnabled) {
-            return true
+            return false
         } else {
             return false
         }

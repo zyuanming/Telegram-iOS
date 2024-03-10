@@ -1912,6 +1912,10 @@ public final class ShareController: ViewController {
         guard let currentContext = self.currentContext as? ShareControllerAppAccountContext else {
             return .single(.done([]))
         }
+        let tmpSaveFolder = NSTemporaryDirectory() + "ShareTmp/"
+        try? FileManager.default.removeItem(atPath: tmpSaveFolder)
+        let _ = try? FileManager.default.createDirectory(at: URL(fileURLWithPath: tmpSaveFolder), withIntermediateDirectories: true, attributes: nil)
+        
         return currentContext.context.engine.data.get(EngineDataMap(
             peerIds.map(TelegramEngine.EngineData.Item.Peer.Peer.init(id:))
         ))
@@ -2231,6 +2235,8 @@ public final class ShareController: ViewController {
                         correlationIds.append(correlationId)
                         messagesToEnqueue.append(.message(text: text, attributes: [], inlineStickers: [:], mediaReference: nil, threadId: threadId, replyToMessageId: replyToMessageId.flatMap { EngineMessageReplySubject(messageId: $0, quote: nil) }, replyToStoryId: nil, localGroupingKey: nil, correlationId: correlationId, bubbleUpEmojiOrStickersets: []))
                     }
+                    
+                    var downloadSignals: [Signal<[EnqueueMessage], NoError>] = []
                     for message in messages {
                         for media in message.media {
                             var banSendType = false
@@ -2290,8 +2296,8 @@ public final class ShareController: ViewController {
                         let correlationId = Int64.random(in: Int64.min ... Int64.max)
                         correlationIds.append(correlationId)
                         
-                        if (message.media.count == 1) {          
-                            if let file = message.media.first as? TelegramMediaFile {
+                        for media in message.media {
+                            if let file = media as? TelegramMediaFile {
                                 let downloadSignal: Signal<(FetchMediaDataState, Bool), NoError> = fetchMediaData(context: currentContext.context, postbox: currentContext.context.account.postbox, userLocation: .other, mediaReference: .message(message: MessageReference(message), media: file))
                                 
                                 let downloadSignal2: Signal<(FetchMediaDataState, Bool), NoError> = downloadSignal |> filter({ (state, _) in
@@ -2302,14 +2308,14 @@ public final class ShareController: ViewController {
                                     }
                                 })
                                 
-                                let downloadAndEnqueueSignal = downloadSignal2 |> mapToSignal({ (state, _) -> Signal<[MessageId?], NoError> in
+                                let downloadAndEnqueueSignal = downloadSignal2 |> mapToSignal({ (state, _) -> Signal<[EnqueueMessage], NoError> in
                                     switch state {
                                     case .progress:
                                         break
                                     case let .data(data):
                                         if data.complete {
                                             
-                                            let tempVideoPath = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
+                                            let tempVideoPath = tmpSaveFolder + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
                                             if let _ = try? FileManager.default.copyItem(atPath: data.path, toPath: tempVideoPath) {
                                                 let randomId = Int64.random(in: Int64.min ... Int64.max)
                                                 let resourceAdjustments: VideoMediaResourceAdjustments? = nil
@@ -2333,7 +2339,7 @@ public final class ShareController: ViewController {
                                                 let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: randomId), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: file.mimeType, size: nil, attributes: fileAttributes)
                                                 let message2: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
                                                 
-                                                return enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: [message2])
+                                                return Signal.single([message2])
                                             }
                                         }
                                         break
@@ -2341,14 +2347,18 @@ public final class ShareController: ViewController {
                                     return Signal.never()
                                 })
                                 
-                                shareSignals.append(downloadAndEnqueueSignal)
+                                downloadSignals.append(downloadAndEnqueueSignal)
                             }
-                        } else {
-                            messagesToEnqueue.append(.forward(source: message.id, threadId: threadId, grouping: .auto, attributes: [], correlationId: correlationId))
                         }
                     }
-//                    messagesToEnqueue = transformMessages(messagesToEnqueue, showNames: showNames, silently: silently)
-//                    shareSignals.append(enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: messagesToEnqueue))
+                    
+                    let shareSignal = combineLatest(queue: Queue.mainQueue(), downloadSignals)
+                    |> mapToSignal({ downloadedMediaMessages -> Signal<[MessageId?], NoError> in
+                        let tmpMessages = transformMessages(downloadedMediaMessages.flatMap{$0}, showNames: showNames, silently: silently)
+                        
+                        return enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: tmpMessages)
+                    })
+                    shareSignals.append(shareSignal)
                 }
             case let .fromExternal(f):
                 return f(peerIds, topicIds, text, currentContext, silently)

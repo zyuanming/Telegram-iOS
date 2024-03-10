@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 import UIKit
 import Display
 import AsyncDisplayKit
@@ -21,6 +22,8 @@ import AnimationCache
 import MultiAnimationRenderer
 import ObjectiveC
 import UndoUI
+import LocalMediaResources
+import LegacyComponents
 
 private var ObjCKey_DeinitWatcher: Int?
 
@@ -2286,10 +2289,66 @@ public final class ShareController: ViewController {
                         
                         let correlationId = Int64.random(in: Int64.min ... Int64.max)
                         correlationIds.append(correlationId)
-                        messagesToEnqueue.append(.forward(source: message.id, threadId: threadId, grouping: .auto, attributes: [], correlationId: correlationId))
+                        
+                        if (message.media.count == 1) {          
+                            if let file = message.media.first as? TelegramMediaFile {
+                                let downloadSignal: Signal<(FetchMediaDataState, Bool), NoError> = fetchMediaData(context: currentContext.context, postbox: currentContext.context.account.postbox, userLocation: .other, mediaReference: .message(message: MessageReference(message), media: file))
+                                
+                                let downloadSignal2: Signal<(FetchMediaDataState, Bool), NoError> = downloadSignal |> filter({ (state, _) in
+                                    if case let .data(data) = state, data.complete {
+                                        return true
+                                    } else {
+                                        return false
+                                    }
+                                })
+                                
+                                let downloadAndEnqueueSignal = downloadSignal2 |> mapToSignal({ (state, _) -> Signal<[MessageId?], NoError> in
+                                    switch state {
+                                    case .progress:
+                                        break
+                                    case let .data(data):
+                                        if data.complete {
+                                            
+                                            let tempVideoPath = NSTemporaryDirectory() + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
+                                            if let _ = try? FileManager.default.copyItem(atPath: data.path, toPath: tempVideoPath) {
+                                                let randomId = Int64.random(in: Int64.min ... Int64.max)
+                                                let resourceAdjustments: VideoMediaResourceAdjustments? = nil
+                                                let fileResource = LocalFileVideoMediaResource(randomId: randomId, path: tempVideoPath, adjustments: resourceAdjustments)
+                                                let fileName = "test.mp4"
+                                                
+                                                let asset = AVURLAsset(url:URL(fileURLWithPath: tempVideoPath))
+                                                let finalDuration = file.duration ?? asset.originalDuration
+                                                let dimensions = file.dimensions ?? PixelDimensions(asset.originalSize)
+                                                
+                                                let preset: TGMediaVideoConversionPreset = TGMediaVideoConversionPresetCompressedMedium
+                                                let estimatedSize = TGMediaVideoConverter.estimatedSize(for: preset, duration: finalDuration, hasAudio:true)
+                                                
+                                                var fileAttributes: [TelegramMediaFileAttribute] = []
+                                                fileAttributes.append(.FileName(fileName: fileName))
+                                                fileAttributes.append(.Video(duration: finalDuration, size: dimensions, flags: [.supportsStreaming], preloadSize: nil))
+                                                if estimatedSize > 10 * 1024 * 1024 {
+                                                    fileAttributes.append(.hintFileIsLarge)
+                                                }
+                                                
+                                                let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: randomId), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: file.mimeType, size: nil, attributes: fileAttributes)
+                                                let message2: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
+                                                
+                                                return enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: [message2])
+                                            }
+                                        }
+                                        break
+                                    }
+                                    return Signal.never()
+                                })
+                                
+                                shareSignals.append(downloadAndEnqueueSignal)
+                            }
+                        } else {
+                            messagesToEnqueue.append(.forward(source: message.id, threadId: threadId, grouping: .auto, attributes: [], correlationId: correlationId))
+                        }
                     }
-                    messagesToEnqueue = transformMessages(messagesToEnqueue, showNames: showNames, silently: silently)
-                    shareSignals.append(enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: messagesToEnqueue))
+//                    messagesToEnqueue = transformMessages(messagesToEnqueue, showNames: showNames, silently: silently)
+//                    shareSignals.append(enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: messagesToEnqueue))
                 }
             case let .fromExternal(f):
                 return f(peerIds, topicIds, text, currentContext, silently)

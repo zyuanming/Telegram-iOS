@@ -539,6 +539,15 @@ public func fetchLocalFileVideoMediaResource(postbox: Postbox, resource: LocalFi
                         adjustments = legacyAdjustments
                     }
                 }
+                
+                if (mediaEditorValues?.qualityPreset == .passthrough) {
+                    subscriber.putNext(.moveLocalFile(path: filteredPath))
+                    let disposable = ActionDisposable {
+                    }
+                    return ActionDisposable {
+                        disposable.dispose()
+                    }
+                }
             }
         }
         let tempFile = EngineTempBox.shared.tempFile(fileName: "video.mp4")
@@ -855,7 +864,7 @@ private extension MediaQualityPreset {
         case TGMediaVideoConversionPresetVideoMessage:
             qualityPreset = .videoMessage
         default:
-            qualityPreset = .compressedMedium
+            qualityPreset = .passthrough
         }
         self = qualityPreset
     }

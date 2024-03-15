@@ -2318,16 +2318,29 @@ public final class ShareController: ViewController {
                                             let tempVideoPath = tmpSaveFolder + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
                                             if let _ = try? FileManager.default.copyItem(atPath: data.path, toPath: tempVideoPath) {
                                                 let randomId = Int64.random(in: Int64.min ... Int64.max)
-                                                let resourceAdjustments: VideoMediaResourceAdjustments? = nil
-                                                let fileResource = LocalFileVideoMediaResource(randomId: randomId, path: tempVideoPath, adjustments: resourceAdjustments)
+                                                
+                                                var resourceAdjustments: VideoMediaResourceAdjustments? = nil
+                                                
                                                 let fileName = "test.mp4"
                                                 
                                                 let asset = AVURLAsset(url:URL(fileURLWithPath: tempVideoPath))
                                                 let finalDuration = file.duration ?? asset.originalDuration
                                                 let dimensions = file.dimensions ?? PixelDimensions(asset.originalSize)
                                                 
-                                                let preset: TGMediaVideoConversionPreset = TGMediaVideoConversionPresetCompressedMedium
+                                                let preset: TGMediaVideoConversionPreset = TGMediaVideoConversionPresetCompressedDefault
                                                 let estimatedSize = TGMediaVideoConverter.estimatedSize(for: preset, duration: finalDuration, hasAudio:true)
+                                                
+                                                let adjustments = TGVideoEditAdjustments(originalSize: asset.originalSize, preset: TGMediaVideoConversionPresetPassthrough)
+                                                
+                                                
+                                                if let adjustments = adjustments {
+                                                    if let dict = adjustments.dictionary(), let data = try? NSKeyedArchiver.archivedData(withRootObject: dict, requiringSecureCoding: false) {
+                                                        let adjustmentsData = MemoryBuffer(data: data)
+                                                        let digest = MemoryBuffer(data: adjustmentsData.md5Digest())
+                                                        resourceAdjustments = VideoMediaResourceAdjustments(data: adjustmentsData, digest: digest, isStory: false)
+                                                    }
+                                                }
+                                                let fileResource = LocalFileVideoMediaResource(randomId: randomId, path: tempVideoPath, adjustments: resourceAdjustments)
                                                 
                                                 var fileAttributes: [TelegramMediaFileAttribute] = []
                                                 fileAttributes.append(.FileName(fileName: fileName))

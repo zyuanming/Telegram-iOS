@@ -2296,82 +2296,93 @@ public final class ShareController: ViewController {
                         let correlationId = Int64.random(in: Int64.min ... Int64.max)
                         correlationIds.append(correlationId)
                         
-                        for media in message.media {
-                            if let file = media as? TelegramMediaFile {
-                                let downloadSignal: Signal<(FetchMediaDataState, Bool), NoError> = fetchMediaData(context: currentContext.context, postbox: currentContext.context.account.postbox, userLocation: .other, mediaReference: .message(message: MessageReference(message), media: file))
-                                
-                                let downloadSignal2: Signal<(FetchMediaDataState, Bool), NoError> = downloadSignal |> filter({ (state, _) in
-                                    if case let .data(data) = state, data.complete {
-                                        return true
-                                    } else {
-                                        return false
-                                    }
-                                })
-                                
-                                let downloadAndEnqueueSignal = downloadSignal2 |> mapToSignal({ (state, _) -> Signal<[EnqueueMessage], NoError> in
-                                    switch state {
-                                    case .progress:
-                                        break
-                                    case let .data(data):
-                                        if data.complete {
-                                            
-                                            let tempVideoPath = tmpSaveFolder + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
-                                            if let _ = try? FileManager.default.copyItem(atPath: data.path, toPath: tempVideoPath) {
-                                                let randomId = Int64.random(in: Int64.min ... Int64.max)
-                                                
-                                                var resourceAdjustments: VideoMediaResourceAdjustments? = nil
-                                                
-                                                let fileName = "test.mp4"
-                                                
-                                                let asset = AVURLAsset(url:URL(fileURLWithPath: tempVideoPath))
-                                                let finalDuration = file.duration ?? asset.originalDuration
-                                                let dimensions = file.dimensions ?? PixelDimensions(asset.originalSize)
-                                                
-                                                let preset: TGMediaVideoConversionPreset = TGMediaVideoConversionPresetCompressedDefault
-                                                let estimatedSize = TGMediaVideoConverter.estimatedSize(for: preset, duration: finalDuration, hasAudio:true)
-                                                
-                                                let adjustments = TGVideoEditAdjustments(originalSize: asset.originalSize, preset: TGMediaVideoConversionPresetPassthrough)
-                                                
-                                                
-                                                if let adjustments = adjustments {
-                                                    if let dict = adjustments.dictionary(), let data = try? NSKeyedArchiver.archivedData(withRootObject: dict, requiringSecureCoding: false) {
-                                                        let adjustmentsData = MemoryBuffer(data: data)
-                                                        let digest = MemoryBuffer(data: adjustmentsData.md5Digest())
-                                                        resourceAdjustments = VideoMediaResourceAdjustments(data: adjustmentsData, digest: digest, isStory: false)
-                                                    }
-                                                }
-                                                let fileResource = LocalFileVideoMediaResource(randomId: randomId, path: tempVideoPath, adjustments: resourceAdjustments)
-                                                
-                                                var fileAttributes: [TelegramMediaFileAttribute] = []
-                                                fileAttributes.append(.FileName(fileName: fileName))
-                                                fileAttributes.append(.Video(duration: finalDuration, size: dimensions, flags: [.supportsStreaming], preloadSize: nil))
-                                                if estimatedSize > 10 * 1024 * 1024 {
-                                                    fileAttributes.append(.hintFileIsLarge)
-                                                }
-                                                
-                                                let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: randomId), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: file.mimeType, size: nil, attributes: fileAttributes)
-                                                let message2: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
-                                                
-                                                return Signal.single([message2])
-                                            }
+                        if (message.isCopyProtectedReal()) {
+                            for media in message.media {
+                                if let file = media as? TelegramMediaFile {
+                                    let downloadSignal: Signal<(FetchMediaDataState, Bool), NoError> = fetchMediaData(context: currentContext.context, postbox: currentContext.context.account.postbox, userLocation: .other, mediaReference: .message(message: MessageReference(message), media: file))
+                                    
+                                    let downloadSignal2: Signal<(FetchMediaDataState, Bool), NoError> = downloadSignal |> filter({ (state, _) in
+                                        if case let .data(data) = state, data.complete {
+                                            return true
+                                        } else {
+                                            return false
                                         }
-                                        break
-                                    }
-                                    return Signal.never()
-                                })
-                                
-                                downloadSignals.append(downloadAndEnqueueSignal)
+                                    })
+                                    
+                                    let downloadAndEnqueueSignal = downloadSignal2 |> mapToSignal({ (state, _) -> Signal<[EnqueueMessage], NoError> in
+                                        switch state {
+                                        case .progress:
+                                            break
+                                        case let .data(data):
+                                            if data.complete {
+                                                
+                                                let tempVideoPath = tmpSaveFolder + "\(Int64.random(in: Int64.min ... Int64.max)).mp4"
+                                                if let _ = try? FileManager.default.copyItem(atPath: data.path, toPath: tempVideoPath) {
+                                                    let randomId = Int64.random(in: Int64.min ... Int64.max)
+                                                    
+                                                    var resourceAdjustments: VideoMediaResourceAdjustments? = nil
+                                                    
+                                                    let fileName = "test.mp4"
+                                                    
+                                                    let asset = AVURLAsset(url:URL(fileURLWithPath: tempVideoPath))
+                                                    let finalDuration = file.duration ?? asset.originalDuration
+                                                    let dimensions = file.dimensions ?? PixelDimensions(asset.originalSize)
+                                                    
+                                                    let preset: TGMediaVideoConversionPreset = TGMediaVideoConversionPresetCompressedDefault
+                                                    let estimatedSize = TGMediaVideoConverter.estimatedSize(for: preset, duration: finalDuration, hasAudio:true)
+                                                    
+                                                    let adjustments = TGVideoEditAdjustments(originalSize: asset.originalSize, preset: TGMediaVideoConversionPresetPassthrough)
+                                                    
+                                                    
+                                                    if let adjustments = adjustments {
+                                                        if let dict = adjustments.dictionary(), let data = try? NSKeyedArchiver.archivedData(withRootObject: dict, requiringSecureCoding: false) {
+                                                            let adjustmentsData = MemoryBuffer(data: data)
+                                                            let digest = MemoryBuffer(data: adjustmentsData.md5Digest())
+                                                            resourceAdjustments = VideoMediaResourceAdjustments(data: adjustmentsData, digest: digest, isStory: false)
+                                                        }
+                                                    }
+                                                    let fileResource = LocalFileVideoMediaResource(randomId: randomId, path: tempVideoPath, adjustments: resourceAdjustments)
+                                                    
+                                                    var fileAttributes: [TelegramMediaFileAttribute] = []
+                                                    fileAttributes.append(.FileName(fileName: fileName))
+                                                    fileAttributes.append(.Video(duration: finalDuration, size: dimensions, flags: [.supportsStreaming], preloadSize: nil))
+                                                    if estimatedSize > 10 * 1024 * 1024 {
+                                                        fileAttributes.append(.hintFileIsLarge)
+                                                    }
+                                                    
+                                                    let file = TelegramMediaFile(fileId: MediaId(namespace: Namespaces.Media.LocalFile, id: randomId), partialReference: nil, resource: fileResource, previewRepresentations: [], videoThumbnails: [], immediateThumbnailData: nil, mimeType: file.mimeType, size: nil, attributes: fileAttributes)
+                                                    let message2: EnqueueMessage = .message(text: "", attributes: [], inlineStickers: [:], mediaReference: .standalone(media: file), threadId: nil, replyToMessageId: nil, replyToStoryId: nil, localGroupingKey: nil, correlationId: nil, bubbleUpEmojiOrStickersets: [])
+                                                    
+                                                    return Signal.single([message2])
+                                                }
+                                            }
+                                            break
+                                        }
+                                        return Signal.never()
+                                    })
+                                    
+                                    downloadSignals.append(downloadAndEnqueueSignal)
+                                }
                             }
+                        } else {
+                            messagesToEnqueue.append(.forward(source: message.id, threadId: threadId, grouping: .auto, attributes: [], correlationId: correlationId))
+                            
                         }
                     }
                     
-                    let shareSignal = combineLatest(queue: Queue.mainQueue(), downloadSignals)
-                    |> mapToSignal({ downloadedMediaMessages -> Signal<[MessageId?], NoError> in
-                        let tmpMessages = transformMessages(downloadedMediaMessages.flatMap{$0}, showNames: showNames, silently: silently)
-                        
-                        return enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: tmpMessages)
-                    })
-                    shareSignals.append(shareSignal)
+                    if (messages.count > 0 && messages.first!.isCopyProtectedReal()) {
+                        let shareSignal = combineLatest(queue: Queue.mainQueue(), downloadSignals)
+                        |> mapToSignal({ downloadedMediaMessages -> Signal<[MessageId?], NoError> in
+                            let tmpMessages = transformMessages(downloadedMediaMessages.flatMap{$0}, showNames: showNames, silently: silently)
+                            
+                            return enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: tmpMessages)
+                        })
+                        shareSignals.append(shareSignal)
+                    } else {
+                        messagesToEnqueue = transformMessages(messagesToEnqueue, showNames: showNames, silently: silently)
+                        shareSignals.append(enqueueMessages(account: currentContext.context.account, peerId: peerId, messages: messagesToEnqueue))
+
+                    }
                 }
             case let .fromExternal(f):
                 return f(peerIds, topicIds, text, currentContext, silently)
